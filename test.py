@@ -14,9 +14,6 @@ import pathes
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 
-TABLE_COLUMNS = ['Название', 'Имя', 'Отзыв', 'Оценка', 'Адрес', 'Ссылка']
-TABLE = {column: [] for column in TABLE_COLUMNS}
-
 
 def get_element_text(driver: WebDriver, path: str) -> str:
     try:
@@ -55,12 +52,15 @@ def save_reviews_content(driver):
 
         for idx, review_block in enumerate(review_blocks[last_review_block_index:], start=1):
             temp += 1
+            actions = ActionChains(driver)
+            actions.move_to_element(review_block)
+            time.sleep(0.1)
+            actions.perform()
             try:
                 name_element = review_block.find_element(By.XPATH, './/span[starts-with(@class, "_16s5yj36")]')
                 name = name_element.get_attribute('title')
             except NoSuchElementException:
                 name = ''
-
             try:
                 date_element = review_block.find_element(By.XPATH, './/div[@class="_4mwq3d"]')
                 date = date_element.text.strip().split(',')[0]
@@ -87,11 +87,6 @@ def save_reviews_content(driver):
                 rating += ratings.get(width, 0)
 
             reviews_content.append({'Имя': name, 'Отзыв': review_text, 'Оценка': rating, 'Дата': date})
-
-            actions = ActionChains(driver)
-            actions.move_to_element(review_block)
-            time.sleep(0.1)
-            actions.perform()
 
             last_review_block_index += 1
 
@@ -127,8 +122,10 @@ def main():
         for item in range(1, count_items + 1):
             if main_block.find_element(By.XPATH, f'div[{item}]').get_attribute('class'):
                 continue
-            element_click(driver,
-                          f'/html/body/div[2]/div/div/div[1]/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div[2]/div[2]/div[1]/div/div/div/div[2]/div/div[{item}]')
+            element_xpath = f'/html/body/div[2]/div/div/div[1]/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div[2]/div[2]/div[1]/div/div/div/div[2]/div/div[{item}]'
+            element = driver.find_element(By.XPATH, element_xpath)
+            driver.execute_script("arguments[0].scrollIntoView();", element)
+            element.click()
             sleep(0.5)
             try:
                 address_element = driver.find_element(By.XPATH, './/span[@class="_er2xx9"]/a')
