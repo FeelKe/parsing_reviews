@@ -92,6 +92,7 @@ def save_reviews_content(driver):
 
         if temp == last_count:
             prev_height = driver.execute_script("return arguments[0].scrollHeight;", full_element)
+            # eshkere
             driver.execute_script("arguments[0].scrollTo(0, arguments[0].scrollHeight);", full_element)
             time.sleep(0.5)
             new_height = driver.execute_script("return arguments[0].scrollHeight;", full_element)
@@ -132,21 +133,35 @@ def main():
                 address = address_element.text.strip()
             except NoSuchElementException:
                 address = None
+            try:
+                phone_element = driver.find_element(By.XPATH, '//div[@class="_b0ke8"]/a')
+                phone_number = phone_element.get_attribute('href')
+                phone_number = phone_number.replace('tel:', '')
+            except NoSuchElementException:
+                phone_number = 'None'
             if not element_click(driver, pathes.btnreviews1):
                 element_click(driver, pathes.btnreviews2)
             sleep(2)
-            place_rating = get_element_text(driver, pathes.place_rating)
+            try:
+                place_rating_element = driver.find_element(By.XPATH, '//div[@class="_10fd7sv"]')
+                place_rating = place_rating_element.text
+            except NoSuchElementException:
+                place_rating = 'None'
+            if not get_element_text(driver, pathes.count_rating1):
+                count_rating = get_element_text(driver, pathes.count_rating2)
+            else:
+                count_rating = get_element_text(driver, pathes.count_rating1)
             move_to_element(driver, main_block)
             link = unquote(driver.current_url)
             reviews_content, _ = save_reviews_content(driver)
-            save_to_database(reviews_content, link, address, place_rating)
+            save_to_database(reviews_content, link, address, place_rating, phone_number, count_rating)
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         element_click(driver, pathes.next_page_btn)
         sleep(0.5)
     driver.quit()
 
 
-def save_to_database(data, link, address, place_rating):
+def save_to_database(data, link, address, place_rating, phone_number, count_rating):
     conn = mysql.connector.connect(
         database="parsing",
         user="root",
@@ -169,10 +184,10 @@ def save_to_database(data, link, address, place_rating):
                 place_id = place_record[0]
             else:
                 add_place_query = """
-                INSERT INTO places (link, address, rating, number)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO places (link, address, place_rating, phone_number, count_rating)
+                VALUES (%s, %s, %s, %s, %s)
                 """
-                add_place_values = (link, address, place_rating, None)
+                add_place_values = (link, address, place_rating, phone_number, count_rating)
                 cursor.execute(add_place_query, add_place_values)
                 place_id = cursor.lastrowid
 
