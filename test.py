@@ -1,75 +1,90 @@
-from __future__ import annotations
-
-import time
-from time import sleep
+import asyncio
+from pyppeteer import launch
+from pyppeteer.errors import PageError
 from urllib.parse import unquote
-
-from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
-from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.remote.webelement import WebElement
 import mysql.connector
 import pathes
 
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
 
-
-def get_element_text(driver: WebDriver, path: str) -> str:
+async def get_element_text(page, xpath):
     try:
-        return driver.find_element(By.XPATH, path).text
-    except NoSuchElementException:
-        return ''
-
-
-def move_to_element(driver: WebDriver, element: WebElement | WebDriver) -> None:
-    try:
-        webdriver.ActionChains(driver).move_to_element(element).perform()
-    except StaleElementReferenceException:
-        pass
-
-
-def element_click(driver: WebDriver | WebElement, path: str) -> bool:
-    try:
-        driver.find_element(By.XPATH, path).click()
-        return True
-    except:
+        return await page.evaluate('''(xpath) => {
+            const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            return element ? element.textContent : '';
+        }''', xpath)
+    except Exception as e:
+        print(e)
         return False
 
 
-def save_reviews_content(driver):
-    reviews_content = []
-    full_element = driver.find_element(By.XPATH, pathes.scroll)
+async def get_element(review_block, xpath):
+    try:
+        name = await review_block.evaluate(f'(element) => {{ return element.querySelector("{xpath}").textContent; }}')
+        return name.strip() if name else ''
+    except Exception as e:
+        print(f"Ошибка при получении текста элемента: {e}")
+        return ''
 
-    review_blocks = driver.find_elements(By.XPATH, '//div[starts-with(@class, "_11gvyqv")]')
+
+async def element_click(page, xpath):
+    try:
+        result = await page.evaluate('''(xpath) => {
+            const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            if (element) {
+                element.click();
+                return true;
+            }
+            return false;
+        }''', xpath)
+        return result
+    except Exception as e:
+        print(f"Ошибка при клике по элементу: {e}")
+        return False
+
+
+async def el_click(page, path):
+    try:
+        element = await page.waitForXPath(path)
+        await element.click()
+        return True
+    except Exception as e:
+        return False
+
+
+async def save_reviews_content(page):
+    reviews_content = []
+    await page.waitForXPath(pathes.scroll)
+    full_elements = await page.xpath(pathes.scroll)
+
+    review_blocks = await page.xpath(
+        '//div[starts-with(@class, "_11gvyqv")]')
     total_count = len(review_blocks)
 
     last_count = 0
     last_review_block_index = 0
     while True:
         temp = 0
-        review_blocks = driver.find_elements(By.XPATH, '//div[starts-with(@class, "_11gvyqv")]')
+        review_blocks = await page.xpath(
+            '//div[starts-with(@class, "_11gvyqv")]')
 
         for idx, review_block in enumerate(review_blocks[last_review_block_index:], start=1):
             temp += 1
-            actions = ActionChains(driver)
-            actions.move_to_element(review_block)
-            time.sleep(0.1)
-            actions.perform()
+            await page.evaluate('(element) => element.scrollIntoView()', review_block)
+            await asyncio.sleep(0.1)
             try:
-                name_element = review_block.find_element(By.XPATH, './/span[starts-with(@class, "_16s5yj36")]')
-                name = name_element.get_attribute('title')
-            except NoSuchElementException:
+                name_element = await review_block.querySelector('span[class^="_16s5yj36"]')
+                name = await page.evaluate('(element) => element.getAttribute("title")', name_element)
+            except Exception as e:
                 name = ''
             try:
-                date_element = review_block.find_element(By.XPATH, './/div[@class="_4mwq3d"]')
-                date = date_element.text.strip().split(',')[0]
-            except NoSuchElementException:
+                date_element = await review_block.querySelector('div[class="_4mwq3d"]')
+                date = await page.evaluate('(element) => element.textContent.trim().split(",")[0]', date_element)
+            except Exception as e:
                 date = ''
             try:
-                review_text_element = review_block.find_element(By.XPATH, './/div[@class="_49x36f"]/a')
-                review_text = review_text_element.text.strip()
-            except NoSuchElementException:
+                review_text_element = await review_block.querySelector('div[class="_49x36f"] > a')
+                review_text = await page.evaluate('(element) => element.textContent.trim()', review_text_element)
+            except Exception as e:
                 review_text = ''
 
             ratings = {
@@ -80,10 +95,11 @@ def save_reviews_content(driver):
                 '10px': 1
             }
 
-            rating_elements = review_block.find_elements(By.XPATH, './/div[@class="_1fkin5c"]')
+            rating_elements = await review_block.xpath(
+                './/div[@class="_1fkin5c"]')
             rating = 0
             for element in rating_elements:
-                width = element.get_attribute('style').split('width: ')[1].split(';')[0]
+                width = await page.evaluate('(element) => getComputedStyle(element).width', element)
                 rating += ratings.get(width, 0)
 
             reviews_content.append({'Имя': name, 'Отзыв': review_text, 'Оценка': rating, 'Дата': date})
@@ -91,11 +107,14 @@ def save_reviews_content(driver):
             last_review_block_index += 1
 
         if temp == last_count:
-            prev_height = driver.execute_script("return arguments[0].scrollHeight;", full_element)
+            prev_height = await page.evaluate('(element) => element.scrollHeight', full_elements[
+                0])
             # eshkere
-            driver.execute_script("arguments[0].scrollTo(0, arguments[0].scrollHeight);", full_element)
-            time.sleep(0.5)
-            new_height = driver.execute_script("return arguments[0].scrollHeight;", full_element)
+            await page.evaluate('(element) => element.scrollTo(0, element.scrollHeight)',
+                                full_elements[0])
+            await asyncio.sleep(0.5)
+            new_height = await page.evaluate('(element) => element.scrollHeight', full_elements[
+                0])
             if new_height == prev_height:
                 break
             else:
@@ -106,62 +125,62 @@ def save_reviews_content(driver):
     return reviews_content, total_count
 
 
-def main():
+async def main():
     search_query = 'Вкусно и точка'
     url = f'https://2gis.ru/ufa/search/{search_query}'
-    driver = webdriver.Edge()
-    driver.maximize_window()
-    driver.get(url)
-    element_click(driver, pathes.main_banner)
-    element_click(driver, pathes.cookie_banner)
-    sleep(0.5)
-    count_all_items = int(get_element_text(driver, pathes.items_count))
-    pages = round(count_all_items / 12 + 0.5)
+    browser = await launch(
+        {'executablePath': 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'headless': False})
+
+    page = await browser.newPage()
+    await page.goto(url)
+    await element_click(page, pathes.cookie_banner)
+    await asyncio.sleep(0.5)
+    count_all_items = await get_element_text(page, pathes.items_count)
+    pages = round(int(count_all_items) / 12 + 0.5)
     for _ in range(pages):
-        main_block = driver.find_element(By.XPATH, pathes.main_block)
-        count_items = len(main_block.find_elements(By.XPATH, 'div'))
+        main_block = await page.waitForXPath(pathes.main_block)
+        items = await page.xpath(f'{pathes.main_block}/div')
+        count_items = len(items)
         for item in range(1, count_items + 1):
-            if main_block.find_element(By.XPATH, f'div[{item}]').get_attribute('class'):
-                continue
+            elements = await main_block.xpath(f'div[{item}]')
+            if elements:
+                class_attribute = await page.evaluate('(element) => element.getAttribute("class")', elements[0])
+                if class_attribute:
+                    continue
             element_xpath = f'/html/body/div[2]/div/div/div[1]/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div[2]/div[2]/div[1]/div/div/div/div[2]/div/div[{item}]'
-            element = driver.find_element(By.XPATH, element_xpath)
-            driver.execute_script("arguments[0].scrollIntoView();", element)
-            element.click()
-            sleep(0.5)
+            element = await page.waitForXPath(element_xpath)
+            await page.evaluate('(element) => { element.scrollIntoView(); }', element)
+            await el_click(page, element_xpath)
+            await asyncio.sleep(0.5)
             try:
-                address_element = driver.find_element(By.XPATH, './/span[@class="_er2xx9"]/a')
-                address = address_element.text.strip()
-            except NoSuchElementException:
+                address = await get_element_text(page, './/span[@class="_er2xx9"]/a')
+                address = address.strip()
+            except PageError:
                 address = None
             try:
-                phone_element = driver.find_element(By.XPATH, '//div[@class="_b0ke8"]/a')
-                phone_number = phone_element.get_attribute('href')
+                phone_number = await get_element_text(page, '//div[@class="_b0ke8"]/a')
                 phone_number = phone_number.replace('tel:', '')
-            except NoSuchElementException:
+            except PageError:
                 phone_number = 'None'
-            if not element_click(driver, pathes.btnreviews1):
-                element_click(driver, pathes.btnreviews2)
-            sleep(2)
+            if not await element_click(page, pathes.btnreviews1):
+                await element_click(page, pathes.btnreviews2)
+            await asyncio.sleep(2)
             try:
-                place_rating_element = driver.find_element(By.XPATH, '//div[@class="_10fd7sv"]')
-                place_rating = place_rating_element.text
-            except NoSuchElementException:
+                place_rating = await get_element_text(page, '//div[@class="_10fd7sv"]')
+            except PageError:
                 place_rating = 'None'
-            if not get_element_text(driver, pathes.count_rating1):
-                count_rating = get_element_text(driver, pathes.count_rating2)
-            else:
-                count_rating = get_element_text(driver, pathes.count_rating1)
-            move_to_element(driver, main_block)
-            link = unquote(driver.current_url)
-            reviews_content, _ = save_reviews_content(driver)
-            save_to_database(reviews_content, link, address, place_rating, phone_number, count_rating)
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        element_click(driver, pathes.next_page_btn)
-        sleep(0.5)
-    driver.quit()
+            count_rating = await get_element_text(page, pathes.count_rating1) or await get_element_text(page,
+                                                                                                        pathes.count_rating2)
+            link = unquote(page.url)
+            reviews_content, _ = await save_reviews_content(page)
+            await save_to_database(reviews_content, link, address, place_rating, phone_number, count_rating)
+        await page.evaluate('window.scrollTo(0, document.body.scrollHeight);')
+        await element_click(page, pathes.next_page_btn)
+        await asyncio.sleep(0.5)
+    await browser.close()
 
 
-def save_to_database(data, link, address, place_rating, phone_number, count_rating):
+async def save_to_database(data, link, address, place_rating, phone_number, count_rating):
     conn = mysql.connector.connect(
         database="parsing",
         user="root",
@@ -209,4 +228,4 @@ def save_to_database(data, link, address, place_rating, phone_number, count_rati
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.get_event_loop().run_until_complete(main())
