@@ -269,7 +269,6 @@ async def save_to_database(data, link, address, place_rating, phone_number, coun
                 cursor.execute(add_place_query, add_place_values)
                 place_id = cursor.lastrowid
 
-
             add_or_update_review_query = """
             INSERT INTO reviews (place_id, reviews_text, rating, date, user_name)
             VALUES (%s, %s, %s, %s, %s)
