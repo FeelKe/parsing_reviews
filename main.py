@@ -184,8 +184,7 @@ async def main():
     search_query = 'Вкусно и точка'
     url = f'https://2gis.ru/ufa/search/{search_query}'
     browser = await launch(
-        {'executablePath': 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'headless': False,
-         'args': ['--disable-infobars', '--window-position=0,0']})
+        {'executablePath': 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'headless': False})
 
     pages = await asyncio.gather(*[browser.newPage() for _ in range(3)])
     queues = [asyncio.Queue() for _ in range(len(pages))]
